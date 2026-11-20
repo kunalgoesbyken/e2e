@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { parseCode } from '../../src/mcp/code-parse.ts';
+import { parseCode } from '../../src/session-tools/code-parse.ts';
 import { runInSandbox, type LineReply, type SandboxResult } from '../../src/session-tools/code-sandbox.ts';
 
 interface Ran extends SandboxResult {
