@@ -100,6 +100,9 @@ describe('billing', () => {
    its action printed, copied as is. When the outcome shows, run its
    `expect` with `run_code` and add it once it passes; a passing statement
    also joins `test_lines`; checks go in the test's assert block at the end.
+   `run_code` runs JavaScript on the test API, so use it for most of a
+   session's work, a loop or a read and a check in one call, over many
+   single actions.
    The walk ends with the test written. Without a
    server, learn the accessible names the app renders from the components or
    a `--headed` run.

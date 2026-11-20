@@ -578,6 +578,9 @@ importers:
       picocolors:
         specifier: 1.1.1
         version: 1.1.1
+      run:
+        specifier: 2.1.13
+        version: 2.1.13(typescript@7.0.2)
       toml-eslint-parser:
         specifier: 1.0.3
         version: 1.0.3
@@ -5056,6 +5059,15 @@ packages:
     resolution: {integrity: sha512-QIiV1J9d0pzN4jeeTH4sjPy0AZ6cAy2cG0ExeoE1+U8Rvj+hR3gYkokx0YbeUNGlZqiQJJ2utcETe0oKXwzsuA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
+
+  run@2.1.13:
+    resolution: {integrity: sha512-Oza31vagvs4YIY6Z8p/SeRCfzFnJIwP7Vh1MF2Wg0ti30cosh/Gm5O8KGuLcIr+hVG52B/FdcV+AiDhJtQPzcg==}
+    engines: {node: '>=20.19.0'}
+    peerDependencies:
+      typescript: '>=5.1.6 <7'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   safe-buffer@5.1.2:
     resolution: {integrity: sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g==}
@@ -10344,6 +10356,10 @@ snapshots:
       '@rolldown/binding-wasm32-wasi': 1.2.19
       '@rolldown/binding-win32-arm64-msvc': 1.2.19
       '@rolldown/binding-win32-x64-msvc': 1.2.19
+
+  run@2.1.13(typescript@7.0.2):
+    optionalDependencies:
+      typescript: 7.0.2
 
   safe-buffer@5.1.2: {}
 

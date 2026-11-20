@@ -57,7 +57,11 @@ larger budget. [How agent steps work](/agent-steps) explains a step in full.
   on a built-in tool that declares fields, never runs. The model reads the refusal
   as the call's result and tries again.
 - The runner never evaluates model text as code, selectors, shell commands,
-  or config.
+  or config. The MCP server's [`run_code`](/reference/mcp#run_code) runs a
+  coding agent's JavaScript in a sandbox with no host access. Each call on
+  `screen`, `app`, or `expect` is parsed into a closed grammar. A call on the
+  engine's fixture (`browser`, `device`) reaches any member a test can call,
+  and what it returns has configured secret values redacted.
 
 | Fails with | When |
 | --- | --- |

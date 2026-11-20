@@ -1,7 +1,9 @@
 /**
- * The grammar `run_code` accepts: test statements as they appear in a test
- * body, parsed by oxc and walked into data the runner reads. Nothing here, or
- * anywhere after it, evaluates the text as code. A statement is an optional
+ * The grammar of a test line, as `run_code` takes one from the code it runs:
+ * a statement as it appears in a test body, parsed by oxc and walked into
+ * data the runner reads. Nothing here, or anywhere after it, evaluates a line
+ * as code; the JavaScript that spells the lines runs apart from the host
+ * (`code-sandbox.ts`). A statement is an optional
  * `await`, then a call chain on `screen` or `app` that ends in an action or a
  * read, or `expect(<locator>)` with an optional `.not` and a matcher.
  * Arguments are literals (strings, numbers, booleans, `null`, regular
@@ -82,11 +84,11 @@ export interface ParseOptions {
 /** Parses `code` into statements, or throws `INVALID_ARGUMENT` at the first node outside the grammar. */
 export function parseCode(code: string, options: ParseOptions): readonly Statement[] {
   if (code.length > MAX_CODE_LENGTH) {
-    throw invalid(`the code is ${String(code.length)} characters; pass at most ${String(MAX_CODE_LENGTH)} at once`);
+    throw invalid(`a line is ${String(code.length)} characters; one takes at most ${String(MAX_CODE_LENGTH)}`);
   }
   const brackets = code.match(/[([{]/g)?.length ?? 0;
   if (brackets > MAX_BRACKETS) {
-    throw invalid(`the code opens ${String(brackets)} brackets; pass at most ${String(MAX_BRACKETS)} at once`);
+    throw invalid(`a line opens ${String(brackets)} brackets; one takes at most ${String(MAX_BRACKETS)}`);
   }
   const { program, errors } = oxcParser().parseSync('run_code.js', code, { lang: 'js', sourceType: 'module' });
   const error = errors.find((candidate) => candidate.severity === 'Error');
@@ -316,7 +318,7 @@ class Walker {
         const [quasi] = node.quasis;
         if (quasi === undefined) break;
         if (node.expressions.length > 0) {
-          throw invalid(`the template at ${this.where(node)} has a \${...} expression at ${this.where(quasi.end)}; run_code runs no expressions, so write the text out`);
+          throw invalid(`the template at ${this.where(node)} has a \${...} expression at ${this.where(quasi.end)}; a line takes no expressions, so write the text out`);
         }
         // Only a tagged template can hold an escape that cooks to nothing.
         if (quasi.value.cooked === null) break;

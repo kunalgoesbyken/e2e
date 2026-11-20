@@ -116,6 +116,7 @@
     "oxc-parser": "0.159.0",
     "oxc-transform": "0.159.0",
     "picocolors": "1.1.1",
+    "run": "2.1.13",
     "toml-eslint-parser": "1.0.3",
     "yaml": "2.9.1",
     "zod": "4.6.7"

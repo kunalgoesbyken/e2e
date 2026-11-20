@@ -137,11 +137,15 @@ export function catalogLine(
   readOnly: boolean,
   redact: (text: string) => string = (text) => text,
 ): string {
+  return `- ${redact(toolSignature(name, tool))}: ${firstSentence(redact(toolDescription(name, tool)))}${readOnly ? ' [read-only]' : ''}`;
+}
+
+/** A tool's name and argument names, `?` marking an optional one: `tap {target, modifiers?}`. */
+export function toolSignature(name: string, tool: ToolSet[string]): string {
   const schema = toolJsonSchema(tool);
   const required = new Set(schema.required ?? []);
   const args = Object.keys(schema.properties ?? {}).map((key) => (required.has(key) ? key : `${key}?`));
-  const signature = args.length === 0 ? name : `${name} {${args.join(', ')}}`;
-  return `- ${redact(signature)}: ${firstSentence(redact(toolDescription(name, tool)))}${readOnly ? ' [read-only]' : ''}`;
+  return args.length === 0 ? name : `${name} {${args.join(', ')}}`;
 }
 
 /** Explains why a name cannot be called on this target. */

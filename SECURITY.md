@@ -47,7 +47,14 @@ given to `defineTool`. The model reads a refusal as the call's result
 and can try again. A node id that cannot be resolved on the current
 screen fails with `LOCATOR_NOT_FOUND`. Policy refusals, such as a denied
 destination or a forbidden secret fill, fail with `POLICY_DENIED`. Model
-text is never evaluated as code, selectors, shell, or config.
+text is never evaluated as code, selectors, shell, or config. The one place
+code from an agent runs is `e2e mcp`'s `run_code`: a coding agent's
+JavaScript runs in a sandbox with no host access. Each call it makes on
+`screen`, `app`, or `expect` is parsed into a closed grammar before the
+runner performs it. A call on the engine's fixture (`browser`, `device`)
+reaches any member a test can call, page scripts included, so the code can
+read what a test can read; what comes back has configured secret values
+redacted, and a value the app derives from one is not caught.
 
 Secrets follow from that split. A `Secret` value never reaches model input,
 digests, logs, reports, or artifacts as text. A secret fill is authorized by the runner from

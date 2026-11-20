@@ -98,6 +98,7 @@ open_session {target: "web", headed: true}
 | `target` | string | いいえ | 開くターゲットです。省略時は `--target`、それもなければ唯一のターゲットを使います。 |
 | `config` | string（パス） | いいえ | このセッションの設定です。絶対パスか、サーバーの作業ディレクトリ（クライアントの MCP 設定の `cwd`）からの相対パスを指定します。省略時は `--config`、それもなければ `e2e run` と同じ方法で検出します。 |
 | `headed` | boolean | いいえ | `true` はこのセッションのブラウザやシミュレーターを表示し、`false` は非表示にします。省略時は `--headed` に従います。 |
+| `path` | string | いいえ | アプリの URL のルートの代わりに開く場所です。たとえば `/settings/members` です。最初の観察はそのページになります。`test` とは併用できません。 |
 | `test` | string | いいえ | 最初に実行する 1 つのテストです。`e2e run` の位置引数と同じ形式で指定します。セッションはテストが止まった場所で停止します。[テストの実行](#running-a-test)を参照してください。 |
 | `engine` | string または object | いいえ | 設定ファイルのないディレクトリで使うセッションのエンジンです。パッケージ名、または `{package, export, options}` を指定します。[設定ファイルなしで使う](#without-a-config)を参照してください。 |
 | `app` | object | いいえ | `engine` セッションのテスト対象アプリです。`url`、`bundleId`、`appPath` で指定します。 |
@@ -155,7 +156,7 @@ close_session {session: "<id>"}
 | [操作](#actions) | 観測したノードを操作します |
 | [`dismiss_keyboard`](#dismiss_keyboard) | 画面上のキーボードを閉じます |
 | [`locate`](#locate) | セマンティックロケーターを試します |
-| [`run_code`](#run_code) | テストの文を実行します |
+| [`run_code`](#run_code) | テスト API 上で JavaScript を実行します |
 | [`test_lines`](#test_lines) | セッションのテスト行を返します |
 | [`screenshot`](#screenshot) | マスキングしたビューポートを返し、必要に応じてファイルに保存します |
 | [座標ツール](#point-tools) | スクリーンショット上の座標で操作します |
@@ -203,47 +204,69 @@ close_session {session: "<id>"}
 
 #### `run_code`
 
-開いているセッションでテストの文を実行し、各文の成功・失敗、読み取った値、画面の変化を返します。テストに書き込む前に、ここで行を試してください。
+開いているセッションで JavaScript を実行し、コードが返した値、ログに出力した内容、アプリに対して実行した各行、画面の変化を返します。値の読み取り、その値を使った計算、操作を 1 回の呼び出しで行うときや、テストに書き込む前に行を試すときに使います。
 
 ```txt
-call {tool: "run_code", args: {code: "await screen.getByLabel('Email').fill('ada@example.com');\nawait expect(screen.getByRole('status')).toHaveText('Saved');"}}
+call {tool: "run_code", args: {code: "const rows = screen.getByRole('listitem');\nconst prices = (await rows.allTextContents()).map((text) => Number(text.match(/\\$([\\d.]+)/)[1]));\nawait expect(rows).toHaveCount(12);\nreturn prices;"}}
 ```
 
 | 入力 | 動作 |
 | --- | --- |
-| `code` | テスト本体に書く形式の文を、`;` または改行で区切って 1 つ以上指定します。 |
-| `timeout` | 省略可能です。各文が待機できる時間を、1〜120000 ミリ秒で指定します。デフォルトは `5000` です。 |
+| `code` | 非同期関数の本体です。`screen`、`app`、`expect`、`credentials`、`secrets`、`console`、エンジンのフィクスチャ（`browser` または `device`）をスコープ内で使えます。 |
+| `timeout` | 省略可能です。各行が待機できる時間を、1〜120000 ミリ秒で指定します。デフォルトは `5000` です。 |
 
-- 文はセッションの `screen` と `app` フィクスチャ上で順番に実行します。待機、一致がちょうど 1 件という規則、マッチャーは、テストと同じです。
-- 最初の失敗で呼び出しを停止します。残りは実行せず、アプリは成功した文の実行後の状態に残します。結果は、テストで発生するコードとメッセージを含むエラー結果です。
-- 成功した文は、読み取りを除き、実行順にそのまま [`test_lines`](#test_lines) の下書きへ追加します。
-- 各文の待機時間は、自身の `timeout` オプションを含め、最大 `timeout` です。設定の [`actionTimeout`](/reference/config#actiontimeout) と [`assertionTimeout`](/reference/config#assertiontimeout) がより短ければ、そちらを適用します。この上限は `app.open`、`app.restart`、`app.clearState` にも適用するため、初回読み込みやデバイス上でのアプリの再起動が遅い場合は増やしてください。
-- `timeout` は正規表現の照合中には停止できません。長い行に対する `/^(\w+\s?)*$/` のようにバックトラックする正規表現は、完了するまでサーバーをブロックします。
-- 読み取りとマッチャーには、シークレットの値の代わりに `<secret:name>` が見えます。
+```txt
+Returned: [12.5,18,24]
+Test lines: 2.
+1. await screen.getByRole('listitem').allTextContents(); -> ["Mug $12.50", ...]
+2. await expect(screen.getByRole('listitem')).toHaveCount(12);
+```
+
+- 変数、ループ、条件分岐、`try`/`catch`、関数、JavaScript の組み込み機能を使えます。JSON の値を `return` すると、その値が返ります。`console.log` の行も返ります。
+- `screen`、`app`、`expect(locator)` に対する呼び出しのうち、操作、読み取り、マッチャーで終わるものは、1 つのテスト行として実行します。待機、一致がちょうど 1 件という規則、マッチャーは、テストと同じです。それぞれ `await` してください。
+- エンジンのフィクスチャのメンバーはどれでも呼び出せます。たとえば `browser.evaluate(() => document.title)` や `browser.goto(url)` です。渡した関数は、`evaluate` のようにフィクスチャがソースを送る先でのみ実行します。`route` のハンドラーのようにランナーが呼び出すハンドラーには対応していません。
+- 失敗した行は `Error` を投げます。その `code` は、テストで発生するコードです。捕捉しなければコードは停止し、結果はエラー結果になります。アプリは成功した行の実行後の状態に残します。
+- 成功した行は、読み取りを除き、実行順に [`test_lines`](#test_lines) の下書きへ追加します。
+- `expect(value)` は、コードが持つ値を確認します。`toBe`、`toEqual`、`toContain`、`toMatch`、`toHaveLength`、比較のマッチャー、`.not` を使えます。
+- 各行の待機時間は、自身の `timeout` オプションを含め、最大 `timeout` です。設定の [`actionTimeout`](/reference/config#actiontimeout) と [`assertionTimeout`](/reference/config#assertiontimeout) がより短ければ、そちらを適用します。この上限は `app.open`、`app.restart`、`app.clearState` にも適用するため、初回読み込みやデバイス上でのアプリの再起動が遅い場合は増やしてください。
+- `setTimeout` は 1 回の呼び出しにつき最大 10 秒待機します。
+- 読み取りとマッチャーには、シークレットの値の代わりに `<secret:name>` が見えるため、コードがシークレットの値を持つことはありません。
 - シークレットの `fill` は、実際の入力先で `type_secret` と同じ確認を行います。設定済みのシークレットであること、フィールドが有効かつ編集可能であること、パスワードならパスワードフィールドであることが必要です。
 
-コードは構文解析し、JavaScript としては実行しません。文法が受け付けるものは次のとおりです。
+コードは、Node のグローバル、モジュール、ファイル、ネットワークのないサンドボックスで実行します。アプリに届くのはテスト行を通じてだけで、サーバーは各行を実行する前に次の文法で構文解析します。
 
 | 要素 | 受け付けるもの |
 | --- | --- |
-| 文 | 任意の `await` に続く、操作または読み取りで終わる `screen` または `app` のチェーン。あるいは `expect(locator)` に任意の `.not` と 1 つのマッチャーを続けたもの |
+| 行 | 操作または読み取りで終わる `screen` または `app` のチェーン。あるいは `expect(locator)` に任意の `.not` と 1 つのマッチャーを続けたもの |
 | ロケーター | `screen.getByRole`、`getByLabel`、`getByText`、`getByPlaceholder`、`getByTestId`、`getByDisplayValue`。`filter`、`or`、`first`、`last`、`nth`、追加の `getBy*` で絞り込めます |
-| 引数 | 文字列、数値、真偽値、`null`、正規表現、`${}` のないテンプレート、配列、オブジェクト、ロケーター、`credentials.user(name).username` |
+| 引数 | 文字列、数値、真偽値、`null`、正規表現、配列、オブジェクト、ロケーター、`credentials.user(name).username` |
 | シークレット | `fill` の値としてのみ、`credentials.user(name).password` または `secrets.get(name)` |
 
-対象外は、エンジンが提供する組み込みフィクスチャ（`browser`、`device`）、`expect(screen)`、`toHaveScreenshot`、`app.screenshot`、`screen.debug`、`screen.pause`、`all`、`setInputFiles`、値のマッチャー（`toBe`、`toEqual`）です。
+対象外は、エンジンが提供する組み込みフィクスチャ（`browser`、`device`）、`page`、`expect(screen)`、`toHaveScreenshot`、`app.screenshot`、`screen.debug`、`screen.pause`、`all`、`setInputFiles` です。
+
+| 上限 | 値 |
+| --- | --- |
+| アプリでの待機を除く、コード自体の実行時間 | 5 秒 |
+| 呼び出し全体 | 5 分 |
+| メモリ | 64 MB |
+| 行と `setTimeout` の呼び出し | 1000 |
+| 戻り値 | 1 MB |
 
 | 投げるエラー | 発生条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | 構文解析できないコード、または文法外のコード。別の名前、未対応の呼び出し、代入、関数などです。メッセージに該当部分と行・列を示し、どの文も実行しません。 |
-| `INVALID_ARGUMENT` | `<secret:name>` を期待するマッチャー。テストでは実際の値を比較するためです。どの文も実行しません。 |
+| `INVALID_ARGUMENT` | 構文解析できないコード。メッセージに行・列を示し、何も実行しません。 |
+| `INVALID_ARGUMENT` | 文法外の行。未対応のメンバーや、引数としての関数などです。その行は実行しません。 |
+| `INVALID_ARGUMENT` | `<secret:name>` を期待するマッチャー。テストでは実際の値を比較するためです。その行は実行しません。 |
+| `ASSERTION_FAILED` | 成り立たない `expect(value)`。 |
 | `POLICY_DENIED` | `type_secret` の確認に通らないフィールドへの、シークレットの `fill`。何も入力しません。 |
 | `POLICY_DENIED` | パスワードフィールドの読み取り。 |
-| `POLICY_DENIED` | 設定にシークレットまたは認証情報があり、テキストの一部で検索するロケーターを使った場合。正規表現、`true` 以外の `exact`、`hasText` が該当します。完全一致のテキストで検索してください。どの文も実行しません。 |
+| `POLICY_DENIED` | 設定にシークレットまたは認証情報があり、テキストの一部で検索するロケーターを使った場合。正規表現、`true` 以外の `exact`、`hasText` が該当します。完全一致のテキストで検索するか、`allTextContents()` でテキストを読み取って `nth` で選んでください。その行は実行しません。 |
+
+コードが上限を超えると、呼び出しはエラーコードのないエラー結果で終了します。
 
 #### `test_lines`
 
-セッションの操作が出力したすべてのテスト行と、[`run_code`](#run_code) で成功したすべての文を、順番にテスト本体の下書きとして返します。引数はありません。
+セッションの操作が出力したすべてのテスト行と、[`run_code`](#run_code) で成功したすべての行を、順番にテスト本体の下書きとして返します。引数はありません。
 
 各操作の結果には、要約の後にテスト行を含めます。
 

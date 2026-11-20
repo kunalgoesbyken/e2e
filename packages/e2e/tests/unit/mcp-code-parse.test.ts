@@ -1,6 +1,6 @@
 /**
- * The `run_code` grammar: test statements as a test body writes them parse
- * into plain data, and anything outside the grammar is refused with the node
+ * The grammar of a `run_code` test line: statements as a test body writes
+ * them parse into plain data, and anything outside the grammar is refused with the node
  * and where it starts, before anything could run. The parser never reaches
  * for `eval` or `Function`.
  */
@@ -233,7 +233,7 @@ describe('parseCode refuses', () => {
     ["screen.getByLabel('Name').fill(credentials.user('admin'))", "run_code: the credential at 1:32 is not in the grammar; write credentials.user('name').username or .password"],
     ["screen.getByLabel('Name').fill(secrets)", "run_code: the secret at 1:32 is not in the grammar; write secrets.get('name')"],
     ["screen.getByLabel('Name').fill(secrets.get())", 'run_code: secrets.get takes the name as a string, found nothing at 1:45'],
-    ['screen.getByLabel(\'Name\').fill(`Hi ${name}`)', 'run_code: the template at 1:32 has a ${...} expression at 1:36; run_code runs no expressions, so write the text out'],
+    ['screen.getByLabel(\'Name\').fill(`Hi ${name}`)', 'run_code: the template at 1:32 has a ${...} expression at 1:36; a line takes no expressions, so write the text out'],
     ["screen.getByRole('row').filter({ __proto__: { hasText: 'x' } }).tap()", 'run_code: the property name "__proto__" at 1:34 is not allowed'],
     ["screen.getByRole('row').filter({ hasText: 'a', hasText: 'b' }).tap()", 'run_code: the property "hasText" at 1:48 is named twice'],
     ["screen.getByRole('row').filter({ hasText }).tap()", 'run_code: the property "hasText" at 1:34 is not in the grammar; write each property as name: value'],
@@ -267,13 +267,13 @@ describe('parseCode refuses', () => {
 
   it('more statements, more code, or deeper nesting than one call takes', () => {
     expect(refusal('app.back();'.repeat(51))).toBe('run_code: pass at most 50 statements at once');
-    expect(refusal(`screen.getByText('${'a'.repeat(10_000)}').tap()`)).toBe('run_code: the code is 10026 characters; pass at most 10000 at once');
+    expect(refusal(`screen.getByText('${'a'.repeat(10_000)}').tap()`)).toBe('run_code: a line is 10026 characters; one takes at most 10000');
     expect(refusal(`screen.getByText(${'['.repeat(20)}${']'.repeat(20)}).tap()`)).toBe('run_code: the argument at 1:34 nests deeper than 16 levels');
   });
 
   it('nesting deep enough to overflow the parser, before the parser reads it', () => {
     // A stack overflow in oxc kills the process, which no catch survives.
-    expect(refusal(`screen.getByText(${'['.repeat(4_900)}${']'.repeat(4_900)}).tap()`)).toBe('run_code: the code opens 4902 brackets; pass at most 1000 at once');
+    expect(refusal(`screen.getByText(${'['.repeat(4_900)}${']'.repeat(4_900)}).tap()`)).toBe('run_code: a line opens 4902 brackets; one takes at most 1000');
     // The deepest code the limits let through: brackets, then arrow functions, which take none.
     const deepest = `screen.getByText(${'('.repeat(998)}${'a=>'.repeat(2_650)}1${')'.repeat(998)}).tap()`;
     expect(deepest.length).toBeLessThanOrEqual(10_000);

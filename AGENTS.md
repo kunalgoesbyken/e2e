@@ -700,7 +700,12 @@ trees, on both platforms, without a device.
     `LOCATOR_NOT_FOUND`, an action failure the model reads and re-aims from.
     `POLICY_DENIED` is for denied destinations, forbidden fills, and withheld
     pixels. Model text is never evaluated as code, selectors, shell, or
-    config. App content, ledger text, and pixels are quoted as untrusted
+    config; `e2e mcp`'s `run_code` runs a coding agent's JavaScript only in a
+    sandbox with no host access, and parses each call it makes on `screen`,
+    `app`, or `expect` into the closed grammar of `code-parse.ts`; a call on
+    an engine fixture reaches any member by name (`code-fixtures.ts`), never
+    what every object inherits, runs no function of the code's on the host,
+    and returns through the secret ledger. App content, ledger text, and pixels are quoted as untrusted
     evidence with no policy authority.
   - Every navigation a test or the agent asks for (`app.open`,
     `browser.goto`, the `navigate` verb) goes through one rule,

@@ -178,8 +178,8 @@ export class SessionTestLines {
   }
 
   /** Records the session's opening of the app, which a test does with `app.open()`. */
-  opened(): void {
-    this.entries.push({ tool: 'open_session', line: 'await app.open();' });
+  opened(path?: string): void {
+    this.entries.push({ tool: 'open_session', line: path === undefined ? 'await app.open();' : navigationLine(path, this.options.appBase) });
   }
 
   /** Records statements `run_code` ran and passed, already in a test's own words, each awaited and ended as a test line. */
@@ -200,7 +200,7 @@ export class SessionTestLines {
   tool(): ToolSet[string] {
     return {
       description:
-        "Every test line this session's actions printed so far, in order, as a draft test body: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the statements run_code passed, as written. Paste it into a test, then add any assertion it lacks. After open_session with test, the lines continue that test from where it stopped.",
+        "Every test line this session's actions printed so far, in order, as a draft test body: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the lines run_code passed. Paste it into a test, then add any assertion it lacks. After open_session with test, the lines continue that test from where it stopped.",
       inputSchema: z.object({}).strict(),
       execute: async () => this.draft(),
     };

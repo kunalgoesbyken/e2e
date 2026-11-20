@@ -4,9 +4,9 @@
  * honors, `screenshot` (which also saves a file when given a path) and the
  * point tools (`tap_at`, `hover_at`, `drag_at`, `type_at`, `press_at`,
  * `select_at`) among it, `locate` tries a semantic
- * locator the way a test would, `run_code` runs whole test statements on
+ * locator the way a test would, `run_code` runs JavaScript whose test lines run on
  * the session's fixtures, `test_lines` returns the test line every action
- * printed (`test-lines.ts`) and the statements `run_code` passed,
+ * printed (`test-lines.ts`) and the lines `run_code` passed,
  * `start_recording` and `stop_recording` follow when the engine records video,
  * and the project's own tools come last. The config load refuses a project
  * tool named like a built-in; should one reach here anyway, the built-in

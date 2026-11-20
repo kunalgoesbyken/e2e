@@ -98,6 +98,7 @@ open_session {target: "web", headed: true}
 | `target` | string | 否 | 要打开的测试目标。否则使用 `--target`，再否则使用唯一的测试目标。 |
 | `config` | string（路径） | 否 | 此会话的配置，使用绝对路径或相对于服务器工作目录（客户端 MCP 配置中的 `cwd`）的路径。否则使用 `--config`，再否则像 `e2e run` 一样自动查找。 |
 | `headed` | boolean | 否 | `true` 显示此会话的浏览器或模拟器，`false` 隐藏。未设置时，会话遵循 `--headed`。 |
+| `path` | string | 否 | 在应用 URL 上打开的位置，代替其根路径，例如 `/settings/members`。首次观察即为该页面。不能与 `test` 同时使用。 |
 | `test` | string | 否 | 首先运行的一个测试，命名方式与 `e2e run` 的位置参数相同。会话停在测试停止的位置。参阅[运行测试](#running-a-test)。 |
 | `engine` | string 或 object | 否 | 在没有配置文件的目录中指定会话引擎，可以是包名或 `{package, export, options}`。参阅[没有配置时](#without-a-config)。 |
 | `app` | object | 否 | `engine` 会话的被测应用，使用 `url`、`bundleId` 或 `appPath`。 |
@@ -155,7 +156,7 @@ close_session {session: "<id>"}
 | [操作](#actions) | 操作观察到的节点 |
 | [`dismiss_keyboard`](#dismiss_keyboard) | 隐藏屏幕键盘 |
 | [`locate`](#locate) | 尝试语义定位器 |
-| [`run_code`](#run_code) | 运行测试语句 |
+| [`run_code`](#run_code) | 在测试 API 上运行 JavaScript |
 | [`test_lines`](#test_lines) | 返回会话的测试代码行 |
 | [`screenshot`](#screenshot) | 返回经过遮盖的视口，可选择保存到文件 |
 | [坐标工具](#point-tools) | 在截图坐标上操作 |
@@ -203,47 +204,69 @@ close_session {session: "<id>"}
 
 #### `run_code`
 
-在实时会话中运行测试语句，返回每条语句的通过或失败结果、读取的值以及屏幕变化。将代码行写入测试前，先在这里运行。
+在实时会话中运行 JavaScript，返回代码的返回值、日志输出、在应用上运行的每一行代码以及屏幕变化。可用它在一次调用中读取值、对值进行计算并执行操作，也可在将代码行写入测试前先运行它。
 
 ```txt
-call {tool: "run_code", args: {code: "await screen.getByLabel('Email').fill('ada@example.com');\nawait expect(screen.getByRole('status')).toHaveText('Saved');"}}
+call {tool: "run_code", args: {code: "const rows = screen.getByRole('listitem');\nconst prices = (await rows.allTextContents()).map((text) => Number(text.match(/\\$([\\d.]+)/)[1]));\nawait expect(rows).toHaveCount(12);\nreturn prices;"}}
 ```
 
 | 输入 | 作用 |
 | --- | --- |
-| `code` | 按测试体写法编写的一条或多条语句，以 `;` 或换行分隔。 |
-| `timeout` | 可选。每条语句可等待的时间，单位为毫秒，范围为 1 到 120000。默认为 `5000`。 |
+| `code` | 异步函数的函数体。作用域内可使用 `screen`、`app`、`expect`、`credentials`、`secrets`、`console` 以及引擎的 fixture（`browser` 或 `device`）。 |
+| `timeout` | 可选。每行代码可等待的时间，单位为毫秒，范围为 1 到 120000。默认为 `5000`。 |
 
-- 语句在会话的 `screen` 和 `app` 测试夹具上依次运行，使用与测试相同的等待、仅匹配一个节点的规则和匹配器。
-- 首次失败会停止调用。后续语句不再运行，应用保持在已通过语句留下的状态，结果为错误结果，包含测试会返回的代码和消息。
-- 通过的语句（读取操作除外）会按原样、按执行顺序加入 [`test_lines`](#test_lines) 草稿。
-- 每条语句最多等待 `timeout`，包括它自己的 `timeout` 选项。如果配置中的 [`actionTimeout`](/reference/config#actiontimeout) 和 [`assertionTimeout`](/reference/config#assertiontimeout) 更短，则使用更短的值。此上限也涵盖 `app.open`、`app.restart` 和 `app.clearState`，因此首次加载较慢或设备重新启动时应增大它。
-- `timeout` 不会在正则表达式匹配中途停止它。发生回溯的表达式，例如在长行上使用 `/^(\w+\s?)*$/`，会阻塞服务器直到匹配结束。
-- 读取操作和匹配器会在机密值所在位置看到 `<secret:name>`。
+```txt
+Returned: [12.5,18,24]
+Test lines: 2.
+1. await screen.getByRole('listitem').allTextContents(); -> ["Mug $12.50", ...]
+2. await expect(screen.getByRole('listitem')).toHaveCount(12);
+```
+
+- 变量、循环、条件语句、`try`/`catch`、函数和 JavaScript 内置对象均可使用。`return` 一个 JSON 值即可将其取回。`console.log` 输出的内容也会返回。
+- 对 `screen`、`app` 或 `expect(locator)` 的调用如果以操作、读取或匹配器结束，会作为一条测试代码行运行，使用与测试相同的等待、仅匹配一个节点的规则和匹配器。每次调用都要 `await`。
+- 引擎 fixture 的任何成员都可以调用，例如 `browser.evaluate(() => document.title)` 或 `browser.goto(url)`。传入的函数只会在 fixture 发送其源码的地方运行，与 `evaluate` 相同。不支持由运行器调用的处理函数，例如 `route` 的处理函数。
+- 失败的代码行会抛出 `Error`，其 `code` 是测试会返回的代码。如果未被捕获，代码会停止，结果为错误结果。应用保持在已通过代码行留下的状态。
+- 通过的代码行（读取操作除外）会按执行顺序加入 [`test_lines`](#test_lines) 草稿。
+- `expect(value)` 检查代码持有的值，可使用 `toBe`、`toEqual`、`toContain`、`toMatch`、`toHaveLength`、比较匹配器和 `.not`。
+- 每行代码最多等待 `timeout`，包括它自己的 `timeout` 选项。如果配置中的 [`actionTimeout`](/reference/config#actiontimeout) 和 [`assertionTimeout`](/reference/config#assertiontimeout) 更短，则使用更短的值。此上限也涵盖 `app.open`、`app.restart` 和 `app.clearState`，因此首次加载较慢或设备重新启动时应增大它。
+- `setTimeout` 每次调用最多等待 10 秒。
+- 读取操作和匹配器会在机密值所在位置看到 `<secret:name>`，因此代码绝不会持有机密值。
 - 机密值 `fill` 会对实际填入的字段执行与 `type_secret` 相同的检查：机密值必须已配置，字段必须已启用且可编辑，密码必须填入密码字段。
 
-代码只会被解析，绝不会作为 JavaScript 执行。语法接受以下内容：
+代码在沙箱中运行，没有 Node 全局对象、模块、文件或网络。它只能通过测试代码行访问应用，服务器会在运行每行代码前将其解析为以下语法：
 
 | 部分 | 接受的内容 |
 | --- | --- |
-| 语句 | 可选的 `await`，然后是以操作或读取结束的 `screen` 或 `app` 调用链，或带有可选 `.not` 和一个匹配器的 `expect(locator)` |
+| 代码行 | 以操作或读取结束的 `screen` 或 `app` 调用链，或带有可选 `.not` 和一个匹配器的 `expect(locator)` |
 | 定位器 | `screen.getByRole`、`getByLabel`、`getByText`、`getByPlaceholder`、`getByTestId` 或 `getByDisplayValue`，可通过 `filter`、`or`、`first`、`last`、`nth` 和更多 `getBy*` 缩小范围 |
-| 参数 | 字符串、数字、布尔值、`null`、正则表达式、不含 `${}` 的模板、数组、对象、定位器，或 `credentials.user(name).username` |
+| 参数 | 字符串、数字、布尔值、`null`、正则表达式、数组、对象、定位器，或 `credentials.user(name).username` |
 | 机密值 | `credentials.user(name).password` 或 `secrets.get(name)`，仅可作为 `fill` 的值 |
 
-不包含：引擎提供的内置测试夹具（`browser`、`device`）、`expect(screen)`、`toHaveScreenshot`、`app.screenshot`、`screen.debug`、`screen.pause`、`all`、`setInputFiles` 和值匹配器（`toBe`、`toEqual`）。
+不包含：引擎提供的内置测试夹具（`browser`、`device`）、`page`、`expect(screen)`、`toHaveScreenshot`、`app.screenshot`、`screen.debug`、`screen.pause`、`all` 和 `setInputFiles`。
+
+| 限制 | 值 |
+| --- | --- |
+| 代码自身的运行时间，不含等待应用的时间 | 5 秒 |
+| 整个调用 | 5 分钟 |
+| 内存 | 64 MB |
+| 代码行和 `setTimeout` 调用 | 1000 |
+| 返回值 | 1 MB |
 
 | 抛出错误 | 何时发生 |
 | --- | --- |
-| `INVALID_ARGUMENT` | 代码无法解析或不符合语法，例如其他名称、未支持的调用、赋值或函数。消息会引用代码及其行列位置，不执行任何语句。 |
-| `INVALID_ARGUMENT` | 匹配器预期 `<secret:name>`，因为测试比较的是真实值。不执行任何语句。 |
+| `INVALID_ARGUMENT` | 代码无法解析。消息会给出行列位置，不执行任何内容。 |
+| `INVALID_ARGUMENT` | 代码行不符合语法，例如使用了未支持的成员或将函数作为参数。该代码行不会运行。 |
+| `INVALID_ARGUMENT` | 匹配器预期 `<secret:name>`，因为测试比较的是真实值。该代码行不会运行。 |
+| `ASSERTION_FAILED` | `expect(value)` 不成立。 |
 | `POLICY_DENIED` | 向未通过 `type_secret` 检查的字段执行机密值 `fill`。不输入任何内容。 |
 | `POLICY_DENIED` | 读取密码字段。 |
-| `POLICY_DENIED` | 配置声明了机密值或凭据时，定位器通过部分文本查找：使用正则表达式、非 `true` 的 `exact` 或 `hasText`。请按精确文本查找。不执行任何语句。 |
+| `POLICY_DENIED` | 配置声明了机密值或凭据时，定位器通过部分文本查找：使用正则表达式、非 `true` 的 `exact` 或 `hasText`。请按精确文本查找，或使用 `allTextContents()` 读取文本后通过 `nth` 选取。该代码行不会运行。 |
+
+代码超出限制时，调用以不含错误代码的错误结果结束。
 
 #### `test_lines`
 
-按顺序返回会话操作输出的所有测试代码行，以及 [`run_code`](#run_code) 通过的所有语句，作为测试体草稿。不接受参数。
+按顺序返回会话操作输出的所有测试代码行，以及 [`run_code`](#run_code) 通过的所有代码行，作为测试体草稿。不接受参数。
 
 每个操作的结果都会在摘要后附带对应代码行：
 
