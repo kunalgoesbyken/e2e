@@ -226,11 +226,15 @@ Test lines: 2.
 - 对 `screen`、`app` 或 `expect(locator)` 的调用如果以操作、读取或匹配器结束，会作为一条测试代码行运行，使用与测试相同的等待、仅匹配一个节点的规则和匹配器。每次调用都要 `await`。
 - 引擎 fixture 的任何成员都可以调用，例如 `browser.evaluate(() => document.title)` 或 `browser.goto(url)`。传入的函数只会在 fixture 发送其源码的地方运行，与 `evaluate` 相同。不支持由运行器调用的处理函数，例如 `route` 的处理函数。
 - 失败的代码行会抛出 `Error`，其 `code` 是测试会返回的代码。如果未被捕获，代码会停止，结果为错误结果。应用保持在已通过代码行留下的状态。
+- 请对每行代码使用 `await`。如果某行失败，在它之后未等待它就创建的代码行不会运行；没有任何地方 `await` 的失败会使调用失败。`setTimeout` 回调抛出的错误也是如此。
+- 运行前只会发现语法错误。语法拒绝的代码行在代码执行到它时才失败，此时它之前的代码行已经运行。
+- 结果会列出已运行的代码行。当代码没有返回值也没有输出日志时，读取操作的值也会显示在那里；否则请用 `return` 返回该值。
 - 通过的代码行（读取操作除外）会按执行顺序加入 [`test_lines`](#test_lines) 草稿。
 - `expect(value)` 检查代码持有的值，可使用 `toBe`、`toEqual`、`toContain`、`toMatch`、`toHaveLength`、比较匹配器和 `.not`。
 - 每行代码最多等待 `timeout`，包括它自己的 `timeout` 选项。如果配置中的 [`actionTimeout`](/reference/config#actiontimeout) 和 [`assertionTimeout`](/reference/config#assertiontimeout) 更短，则使用更短的值。此上限也涵盖 `app.open`、`app.restart` 和 `app.clearState`，因此首次加载较慢或设备重新启动时应增大它。
-- `setTimeout` 每次调用最多等待 10 秒。
-- 读取操作和匹配器会在机密值所在位置看到 `<secret:name>`，因此代码绝不会持有机密值。
+- `setTimeout` 每次调用最多等待 10 秒。`clearTimeout` 可取消它。
+- `timeout` 不会中断正在匹配的正则表达式。会回溯的正则表达式（例如对长文本行使用 `/^(\w+\s?)*$/`）会阻塞服务器，直到匹配结束。
+- 读取操作、匹配器以及引擎测试夹具返回的值，会在已配置机密值所在位置显示 `<secret:name>`。
 - 机密值 `fill` 会对实际填入的字段执行与 `type_secret` 相同的检查：机密值必须已配置，字段必须已启用且可编辑，密码必须填入密码字段。
 
 代码在沙箱中运行，没有 Node 全局对象、模块、文件或网络。它只能通过测试代码行访问应用，服务器会在运行每行代码前将其解析为以下语法：
@@ -242,12 +246,12 @@ Test lines: 2.
 | 参数 | 字符串、数字、布尔值、`null`、正则表达式、数组、对象、定位器，或 `credentials.user(name).username` |
 | 机密值 | `credentials.user(name).password` 或 `secrets.get(name)`，仅可作为 `fill` 的值 |
 
-不包含：引擎提供的内置测试夹具（`browser`、`device`）、`page`、`expect(screen)`、`toHaveScreenshot`、`app.screenshot`、`screen.debug`、`screen.pause`、`all` 和 `setInputFiles`。
+不包含：`page`、`expect(screen)`、`toHaveScreenshot`、`app.screenshot`、`screen.debug`、`screen.pause`、`all` 和 `setInputFiles`。
 
 | 限制 | 值 |
 | --- | --- |
 | 代码自身的运行时间，不含等待应用的时间 | 5 秒 |
-| 整个调用 | 5 分钟 |
+| 整个调用（到结束时的观察之前） | 5 分钟 |
 | 内存 | 64 MB |
 | 代码行和 `setTimeout` 调用 | 1000 |
 | 返回值 | 1 MB |

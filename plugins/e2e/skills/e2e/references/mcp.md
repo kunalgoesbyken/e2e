@@ -212,12 +212,12 @@ looks: `run_code` reads the accessibility tree, not pixels.
    with `getByRole('status').filter({ hasText: 'Saved.' })` or `getByText`.
 
    `run_code` runs statements as a test body writes them, in order, with a
-   test's waits and matchers, and stops at the first failure. The
-   statements that pass, except reads, join `test_lines` in the order they
-   ran. When one fails, fix it from its code and message and the screen in
-   the result, then run only the fixed statement and the ones after it:
-   the app is where the passing statements left it, so starting over
-   repeats their actions. A call on the engine's fixture runs there too
+   test's waits and matchers. Await each app call. A failure you do not
+   catch stops the script, and the statements that pass, except reads, join
+   `test_lines` in the order they ran. When one fails, fix it from its code
+   and message and the screen in the result, and check which lines already
+   ran before resuming so you avoid repeating an action: the app is where
+   the passing statements left it. A call on the engine's fixture runs there too
    (`await browser.url()`); `expect` takes a locator or a value, so check
    the URL as a value, `expect(await browser.url()).toContain('/cart')`, and
    write `expect(browser).toHaveURL(...)` in the test. In a project with

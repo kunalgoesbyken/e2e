@@ -53,7 +53,6 @@ const ALIASES: Readonly<Record<string, string>> = {
   scrollIntoViewIfNeeded: 'scrollIntoView',
   innerText: 'textContent',
   allInnerTexts: 'allTextContents',
-  isEditable: 'isEnabled',
 };
 
 const QUERIES = [...SURFACE.locator].flatMap(([name, member]) => (member.kind === 'query' ? [name] : []));
@@ -66,6 +65,7 @@ const PRELUDE = `
 const __queries = new Set(${JSON.stringify(QUERIES)});
 const __logs = [];
 const __quote = (text) => "'" + text.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'").replace(/\\n/g, '\\\\n').replace(/\\r/g, '\\\\r').replace(/\\u2028/g, '\\\\u2028').replace(/\\u2029/g, '\\\\u2029') + "'";
+const __refuse = (message) => { const error = new Error('INVALID_ARGUMENT: ' + message); error.code = 'INVALID_ARGUMENT'; throw error; };
 const __lit = (value, loose) => {
   if (typeof value === 'string') return __quote(value);
   if (value === null || typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -73,11 +73,11 @@ const __lit = (value, loose) => {
   if (typeof value === 'function' || (typeof value === 'object' && typeof value.__src === 'string')) {
     if (typeof value.__src === 'string') return value.__src;
     if (loose) return typeof value.__text === 'string' ? value.__text : Function.prototype.toString.call(value);
-    throw new Error('a function is not an argument a test line takes');
+    __refuse('a function is not an argument a test line takes');
   }
   if (Array.isArray(value)) return '[' + value.map((item) => __lit(item, loose)).join(', ') + ']';
   if (typeof value === 'object') return '{ ' + Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => (/^[A-Za-z_$][\\w$]*$/.test(key) ? key : __quote(key)) + ': ' + __lit(item, loose)).join(', ') + ' }';
-  throw new Error('a ' + typeof value + ' is not an argument a test line takes');
+  __refuse('a ' + typeof value + ' is not an argument a test line takes');
 };
 const __args = (values, loose) => { while (values.length > 0 && values[values.length - 1] === undefined) values.pop(); return values.map((value) => __lit(value, loose)).join(', '); };
 const __aliases = new Map(Object.entries(${JSON.stringify(ALIASES)}));
@@ -88,19 +88,39 @@ const __track = (sent) => {
   sent.then(settled, settled);
   return sent;
 };
-const __reply = (text) => {
-  const reply = JSON.parse(text);
+const __reply = (reply) => {
   if (reply.ok) return reply;
   const error = new Error(reply.code + ': ' + reply.message);
   error.code = reply.code;
   throw error;
 };
-const __send = (source) => __track((async () => __reply(await __line(source)).value)());
-// Lines the code did not await still run to their end, so the result shows them and the app is where they left it.
+// One line at the host at a time, in the order the code made them. Lines made without waiting for one that then
+// fails do not run, as a test stops at its first failure; a line made after the failure reached the code does.
+let __tail = Promise.resolve();
+let __made = 0;
+let __stoppedThrough = 0;
+const __inTurn = (ask) => {
+  const place = ++__made;
+  const turn = __tail.then(async () => {
+    if (place <= __stoppedThrough) return { ok: false, code: 'CANCELLED', message: 'a line before this one failed, and this one was made without waiting for it, so it did not run; await each line' };
+    const reply = JSON.parse(await ask());
+    if (!reply.ok && reply.code !== 'CANCELLED') __stoppedThrough = __made;
+    return reply;
+  });
+  __tail = turn.catch(() => {});
+  return turn;
+};
+const __send = (source) => __track((async () => __reply(await __inTurn(() => __line(source))).value)());
+// Lines the code did not await and timers it set still run to their end, so the result shows them and the app is
+// where they left it. Answers the first failure among them: nothing in the code was there to catch it.
 const __settle = async () => {
-  if (__pending.size === 0) return;
-  __logs.push(String(__pending.size) + ' call(s) on the app were not awaited when the code ended; they ran, but await each one so a failure stops the code.');
-  await Promise.allSettled([...__pending]);
+  if (__pending.size > 0) __logs.push(String(__pending.size) + ' call(s) on the app were not awaited when the code ended; they ran, but await each one so a failure stops the code.');
+  const lost = [];
+  while (__pending.size > 0 || __timers.size > 0) {
+    for (const line of await Promise.allSettled([...__pending])) if (line.status === 'rejected') lost.push(line.reason);
+    await Promise.all([...__timers.values()]);
+  }
+  return [...lost, ...__thrown][0];
 };
 const __chain = (source, ends) => new Proxy(function () {}, {
   get: (_, name) => {
@@ -121,17 +141,37 @@ const screen = __chain('screen', false);
 const app = __chain('app', true);
 const credentials = { user: (name) => ({ username: { __src: 'credentials.user(' + __quote(String(name)) + ').username' }, password: { __src: 'credentials.user(' + __quote(String(name)) + ').password' } }) };
 const secrets = { get: (name) => ({ __src: 'secrets.get(' + __quote(String(name)) + ')' }) };
-const __show = (value) => { if (typeof value === 'string') return value; try { return JSON.stringify(value) ?? String(value); } catch { return String(value); } };
+const __show = (value) => { if (typeof value === 'string') return value; if (value instanceof RegExp) return String(value); try { return JSON.stringify(value) ?? String(value); } catch { return String(value); } };
 const __fail = (message) => { const error = new Error('ASSERTION_FAILED: ' + message); error.code = 'ASSERTION_FAILED'; throw error; };
-const __same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// Equality as the test API's expect has it for plain data: key order aside, an undefined property as a missing one.
+const __same = (a, b) => {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  for (const value of [a, b]) if (value instanceof Map || value instanceof Set) __refuse('expect(value) compares plain data here; turn a Map or Set into an array first');
+  if (a instanceof RegExp || b instanceof RegExp) return a instanceof RegExp && b instanceof RegExp && a.source === b.source && a.flags === b.flags;
+  if (a instanceof Date || b instanceof Date) return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
+  if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, index) => __same(item, b[index]));
+  const keys = (object) => Object.keys(object).filter((key) => object[key] !== undefined);
+  return keys(a).length === keys(b).length && keys(a).every((key) => Object.hasOwn(b, key) && __same(a[key], b[key]));
+};
+const __contains = (actual, expected) => {
+  if (typeof actual === 'string') return typeof expected === 'string' ? actual.includes(expected) : __fail('toContain on a string requires a string, got ' + __show(expected));
+  if (!Array.isArray(actual)) __fail('toContain requires a string or an array, got ' + __show(actual));
+  return actual.some((item) => __same(item, expected));
+};
+// A global or sticky RegExp keeps lastIndex between tests, so the match runs on a copy without those flags.
+const __matches = (actual, expected) => {
+  if (typeof actual !== 'string') __fail('toMatch requires a string, got ' + __show(actual));
+  return expected instanceof RegExp ? new RegExp(expected.source, expected.flags.replace(/[gy]/g, '')).test(actual) : actual.includes(String(expected));
+};
 const __values = (actual, negated) => {
   const check = (pass, message) => { if (pass === negated) __fail('expected ' + __show(actual) + (negated ? ' not ' : ' ') + message); };
   return {
     toBe: (expected) => check(Object.is(actual, expected), 'to be ' + __show(expected)),
     toEqual: (expected) => check(__same(actual, expected), 'to equal ' + __show(expected)),
     toStrictEqual: (expected) => check(__same(actual, expected), 'to equal ' + __show(expected)),
-    toContain: (expected) => check(actual != null && actual.includes(expected), 'to contain ' + __show(expected)),
-    toMatch: (expected) => check(typeof actual === 'string' && (expected instanceof RegExp ? expected.test(actual) : actual.includes(expected)), 'to match ' + String(expected)),
+    toContain: (expected) => check(__contains(actual, expected), 'to contain ' + __show(expected)),
+    toMatch: (expected) => check(__matches(actual, expected), 'to match ' + String(expected)),
     toHaveLength: (expected) => check(actual != null && actual.length === expected, 'to have length ' + String(expected)),
     toBeGreaterThan: (expected) => check(actual > expected, 'to be greater than ' + __show(expected)),
     toBeGreaterThanOrEqual: (expected) => check(actual >= expected, 'to be at least ' + __show(expected)),
@@ -162,23 +202,23 @@ const __encode = (value) => {
   if (value instanceof RegExp) return { t: 'regex', s: value.source, f: value.flags };
   if (typeof value === 'function') {
     if (typeof value.__handle === 'number') return { t: 'handle', id: value.__handle };
-    if (typeof value.__text === 'string') throw new Error(value.__text + ' is not awaited; await it before passing it on');
+    if (typeof value.__text === 'string') __refuse(value.__text + ' is not awaited; await it before passing it on');
     return { t: 'function', s: Function.prototype.toString.call(value) };
   }
-  if (typeof value.__src === 'string') throw new Error(value.__src + ' is a locator or secret of screen, which a call on an engine fixture does not take');
+  if (typeof value.__src === 'string') __refuse(value.__src + ' is a locator or secret of screen, which a call on an engine fixture does not take');
   if (Array.isArray(value)) return { t: 'array', v: value.map(__encode) };
   if (typeof value === 'object') return { t: 'object', v: Object.entries(value).filter(([, item]) => item !== undefined).map(([key, item]) => [key, __encode(item)]) };
-  throw new Error('a ' + typeof value + ' is not an argument a call takes');
+  __refuse('a ' + typeof value + ' is not an argument a call takes');
 };
 const __request = (base, path, values, text) => __track((async () => {
   let from = base;
   if (base.after !== undefined) {
     const held = await base.after;
-    if (held == null || typeof held.__handle !== 'number') throw new Error(text + ' reads or calls a value, not an object; await the value first');
+    if (held == null || typeof held.__handle !== 'number') __refuse(text + ' reads or calls a value, not an object; await the value first');
     from = { handle: held.__handle };
   }
   const args = values === undefined ? undefined : values.map(__encode);
-  const reply = __reply(await __e2e.call(JSON.stringify({ base: from, path, args, source: text })));
+  const reply = __reply(await __inTurn(() => __e2e.call(JSON.stringify({ base: from, path, args, source: text }))));
   return reply.handle === undefined ? reply.value : __remote({ handle: reply.handle }, text, []);
 })());
 const __told = (text) => (name) => (name === '__text' ? text : name === Symbol.toPrimitive || name === 'toString' || name === 'valueOf' ? () => text : undefined);
@@ -217,7 +257,16 @@ const __remote = (base, source, path) => {
 const __log = (...values) => { __logs.push(values.map(__show).join(' ')); };
 // Passed to the code as parameters, since the runtime's own console cannot be replaced.
 const __console = { log: __log, info: __log, debug: __log, warn: __log, error: __log };
-const __setTimeout = (callback, ms) => { __sleep(Number(ms) || 0).then(() => callback()); return 0; };
+// A timer's callback runs with nothing awaiting it, so what it throws is kept for the program's end.
+const __timers = new Map();
+const __thrown = [];
+let __timer = 0;
+const __setTimeout = (callback, ms, ...values) => {
+  const id = ++__timer;
+  __timers.set(id, __sleep(Number(ms) || 0).then(() => (__timers.has(id) ? callback(...values) : undefined)).catch((error) => { __thrown.push(error); }).finally(() => { __timers.delete(id); }));
+  return id;
+};
+const __clearTimeout = (id) => { __timers.delete(id); };
 `;
 
 /** What the program returns, as its own last lines write it. */
@@ -243,8 +292,9 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 /** The guest's program around the code: its value or its error, with what it logged either way, as JSON. */
 function program(code: string, fixtures: readonly string[]): string {
   return `${head(fixtures)}${code}
-  })(${['__console', '__setTimeout', '() => {}', ...fixtures.map((name) => `__remote({ root: ${JSON.stringify(name)} }, ${JSON.stringify(name)}, [])`)].join(', ')});
-  await __settle();
+  })(${['__console', '__setTimeout', '__clearTimeout', ...fixtures.map((name) => `__remote({ root: ${JSON.stringify(name)} }, ${JSON.stringify(name)}, [])`)].join(', ')});
+  const __lost = await __settle();
+  if (__lost !== undefined) throw __lost;
   return JSON.stringify({ value: __value, logs: __logs });
 } catch (error) {
   await __settle();

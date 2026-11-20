@@ -256,6 +256,32 @@ return { added: after - before, code, items };`,
     expect(result.text).toMatch(/^Returned: "early"\nconsole:\n {3}1 call\(s\) on the app were not awaited when the code ended; .*\nTest lines: 1\.\n1\. await screen\.getByRole\('button', 'Increment'\)\.tap\(\);\n/);
   });
 
+  it('stops at a failure the code did not await, and at one a timer callback throws', async () => {
+    const counter = "Number(await screen.getByRole('status', 'Counter').textContent())";
+    const before = await runCode(`return ${counter};`);
+    const flat = await runCode("screen.getByRole('button', 'Nowhere').tap();\nscreen.getByRole('button', 'Increment').tap();", 300);
+    expect(flat.isError).toBe(true);
+    expect(flat.text).toMatch(/^Failed: LOCATOR_NOT_FOUND: /);
+    expect(flat.text).not.toContain("'Increment').tap();");
+    expect((await runCode(`return ${counter};`)).text.split('\n')[0]).toBe(before.text.split('\n')[0]);
+
+    const timer = await runCode("setTimeout(() => { expect(1).toBe(2); }, 10);\nawait new Promise((resolve) => setTimeout(resolve, 60));\nreturn 'after';");
+    expect(timer.isError).toBe(true);
+    expect(timer.text).toMatch(/^Failed: ASSERTION_FAILED: expected 1 to be 2\n/);
+    const direct = await runCode('expect(1).toBe(2);');
+    expect(direct.text).toMatch(/^Failed: ASSERTION_FAILED: expected 1 to be 2\n/);
+  });
+
+  it('refuses what the grammar and the serializer do not take with a code the code can catch', async () => {
+    const caught = await runCode(`const codes = [];
+for (const attempt of [() => screen.getByRole('button', 'Increment').filter(() => true).tap(), () => screen.getByRole('button', 'Increment').isEditable()]) {
+  try { await attempt(); } catch (error) { codes.push(error.code); }
+}
+return codes;`);
+    expect(caught.isError, caught.text).toBe(false);
+    expect(caught.text).toMatch(/^Returned: \["INVALID_ARGUMENT","INVALID_ARGUMENT"\]\n/);
+  });
+
   describe('secrets', () => {
     it('fills a password only where type_secret would, and keeps the screenshot after the fill', async () => {
       const before = await call('screenshot');
@@ -305,6 +331,10 @@ await expect(screen.getByTestId('plain')).toHaveText('nothing yet');`, 300);
       expect(echoed.text).toContain('-> ["<secret:apiKey>"]\n');
       expect(echoed.text).toContain('4. failed:');
       expect(echoed.text).toContain('observed: text "<secret:apiKey>"');
+      // The message the code catches has passed the ledger too, before the result is rendered.
+      const message = await runCode("try { await expect(screen.getByTestId('plain')).toHaveText('nothing yet'); } catch (error) { return { code: error.code, message: error.message }; }", 300);
+      expect(message.text).toMatch(/^Returned: \{"code":"ASSERTION_FAILED","message":"[^\n]*<secret:apiKey>/);
+      expect(message.text).not.toContain('sk-live');
     });
 
     it('compares matchers against redacted text, so no pass or fail depends on a secret', async () => {

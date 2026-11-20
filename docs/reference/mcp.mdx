@@ -290,6 +290,13 @@ Test lines: 2.
 - A line that fails throws an `Error` whose `code` is the code a test would
   get. Uncaught, it stops the code and the result is an error result. The
   app stays where the passing lines left it.
+- `await` each line. Lines made without waiting for one that then fails
+  don't run, and a failure nothing awaited fails the call. So does an error
+  a `setTimeout` callback throws.
+- Only a syntax error is found before anything runs. A line the grammar
+  refuses fails when the code reaches it, after the lines before it ran.
+- The result lists the lines that ran. A read shows its value there when the
+  code returns nothing and logs nothing. Otherwise `return` the value.
 - The lines that pass, except reads, join the [`test_lines`](#test_lines)
   draft in the order they ran.
 - `expect(value)` checks a value the code holds, with `toBe`, `toEqual`,
@@ -299,7 +306,10 @@ Test lines: 2.
   [`assertionTimeout`](/reference/config#assertiontimeout) apply when
   shorter. The cap also covers `app.open`, `app.restart`, and
   `app.clearState`, so raise it for a slow first load or a device relaunch.
-- `setTimeout` waits up to 10 seconds a call.
+- `setTimeout` waits up to 10 seconds a call. `clearTimeout` cancels one.
+- `timeout` doesn't stop a regular expression mid-match. One that
+  backtracks, such as `/^(\w+\s?)*$/` on a long line, blocks the server
+  until it finishes.
 - Reads, matchers, and values the engine's fixture returns show
   `<secret:name>` where a configured secret value is.
 - A secret `fill` passes the checks `type_secret` runs, on the field it lands
@@ -317,14 +327,13 @@ into this grammar before it runs:
 | Argument | A string, number, boolean, `null`, regular expression, array, object, locator, or `credentials.user(name).username` |
 | Secret | `credentials.user(name).password` or `secrets.get(name)`, as `fill`'s value only |
 
-Left out: the built-in fixtures an engine contributes (`browser`, `device`),
-`page`, `expect(screen)`, `toHaveScreenshot`, `app.screenshot`,
+Left out: `page`, `expect(screen)`, `toHaveScreenshot`, `app.screenshot`,
 `screen.debug`, `screen.pause`, `all`, and `setInputFiles`.
 
 | Limit | Value |
 | --- | --- |
 | The code's own running time, waits on the app aside | 5 seconds |
-| The whole call | 5 minutes |
+| The whole call, up to the observation that closes it | 5 minutes |
 | Memory | 64 MB |
 | Lines and `setTimeout` calls | 1000 |
 | Return value | 1 MB |

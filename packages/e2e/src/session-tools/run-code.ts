@@ -134,7 +134,7 @@ export function runCodeTool(options: RunCodeOptions): ToolSet[string] {
       'return a JSON value to get it back; console.log lines come back too. The result lists each test line the code ran, then what changed on screen.',
       ...runCodeApi(options),
       `Actions and matchers wait like a test: each waits at most timeout ms (default ${String(RUN_CODE_TIMEOUT_MS)}), so a loop rarely needs a sleep; setTimeout works when it does.`,
-      'A line that fails throws an Error whose code is the runner code (LOCATOR_NOT_FOUND, ASSERTION_FAILED, ...); uncaught, it stops the code and the app stays where it is.',
+      'A line that fails throws an Error whose code is the runner code (LOCATOR_NOT_FOUND, ASSERTION_FAILED, ...); uncaught, it stops the code and the app stays where it is. Await each line: lines sent without waiting for one that fails do not run.',
       "Lines that pass, except reads, join test_lines' draft in the order they ran.",
       'Reads and matchers see <secret:name> where a secret value is. When the project configures secrets, find locators by their exact text: a regular expression, exact: false, or hasText in a query is refused with POLICY_DENIED.',
     ].join(' '),
@@ -158,6 +158,9 @@ async function runCode(options: RunCodeOptions, args: RunCodeArgs, signal: Abort
   const attempt = options.attempt(signal);
   const { agentRuntime: runtime, budget } = attempt;
   const timeout = args.timeout ?? RUN_CODE_TIMEOUT_MS;
+  // A line waits its timeout or what is left of the whole call, whichever ends first.
+  const deadline = Date.now() + PROGRAM_TIMEOUT_MS;
+  const wait = (): number => Math.max(1, Math.min(timeout, deadline - Date.now()));
   const runner = new LineRunner(attempt);
   const outcomes: Outcome[] = [];
   const line = async (source: string): Promise<LineReply> => {
@@ -166,13 +169,14 @@ async function runCode(options: RunCodeOptions, args: RunCodeArgs, signal: Abort
       if (statement === undefined || rest.length > 0) throw new TestError('INVALID_ARGUMENT', 'run_code: a line is one statement');
       refuseMarkerExpectation(statement);
       if (runtime.config.allSecrets.size > 0) refuseLocatorByPart(statement);
-      const value = await budget.capped(timeout, () => runner.run(statement));
+      const value = await budget.capped(wait(), () => runner.run(statement));
       outcomes.push({ source: statement.source, read: isRead(statement), value });
       return { ok: true, value: value ?? null };
     } catch (cause) {
       const error = classifyError(cause);
       outcomes.push({ source, error });
-      return { ok: false, code: error.code, message: error.message };
+      // The code can read the message, so it passes the ledger here and not only in the rendered result.
+      return { ok: false, code: error.code, message: runtime.redact(error.message) };
     }
   };
   const fixtures = new FixtureCalls((name) => (options.engineFixtures.includes(name) ? Reflect.get(attempt.fixtures, name) : undefined), runtime.redact);
@@ -181,7 +185,7 @@ async function runCode(options: RunCodeOptions, args: RunCodeArgs, signal: Abort
     try {
       const request = parseFixtureRequest(payload);
       source = `await ${request.source};`;
-      const settled = await budget.capped(timeout, () => fixtures.run(request));
+      const settled = await budget.capped(wait(), () => fixtures.run(request));
       // An object the host keeps is a step on the way to a call, not a line of its own.
       if ('handle' in settled) return { ok: true, handle: settled.handle };
       outcomes.push({ source, read: settled.value !== undefined, value: settled.value });
@@ -470,7 +474,7 @@ function render(result: SandboxResult, outcomes: readonly Outcome[], screen: str
         lines.push(`${number} failed: ${outcome.source}`, indent(`${outcome.error.code}: ${outcome.error.message}`));
       } else {
         const { value } = outcome;
-        lines.push(`${number} ${outcome.source}${value === undefined ? '' : ` -> ${clip(show(value))}`}`);
+        lines.push(`${number} ${outcome.source}${value === undefined ? '' : ` -> ${show(value)}`}`);
       }
     }
   }
@@ -480,10 +484,6 @@ function render(result: SandboxResult, outcomes: readonly Outcome[], screen: str
 /** A value as JSON, so a string reads apart from the text around it and an empty one still shows. */
 function show(value: unknown): string {
   return JSON.stringify(value) ?? String(value);
-}
-
-function clip(text: string): string {
-  return text.length <= 200 ? text : `${text.slice(0, 200)}...`;
 }
 
 function indent(text: string): string {

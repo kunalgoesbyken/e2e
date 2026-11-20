@@ -226,11 +226,15 @@ Test lines: 2.
 - `screen`、`app`、`expect(locator)` に対する呼び出しのうち、操作、読み取り、マッチャーで終わるものは、1 つのテスト行として実行します。待機、一致がちょうど 1 件という規則、マッチャーは、テストと同じです。それぞれ `await` してください。
 - エンジンのフィクスチャのメンバーはどれでも呼び出せます。たとえば `browser.evaluate(() => document.title)` や `browser.goto(url)` です。渡した関数は、`evaluate` のようにフィクスチャがソースを送る先でのみ実行します。`route` のハンドラーのようにランナーが呼び出すハンドラーには対応していません。
 - 失敗した行は `Error` を投げます。その `code` は、テストで発生するコードです。捕捉しなければコードは停止し、結果はエラー結果になります。アプリは成功した行の実行後の状態に残します。
+- 各行を `await` してください。待たずに作った行は、その前の行が失敗すると実行しません。どこでも `await` していない失敗は、呼び出しを失敗させます。`setTimeout` のコールバックが投げたエラーも同じです。
+- 実行前に見つかるのは構文エラーだけです。文法が拒否する行は、コードがその行に到達した時点で失敗し、それより前の行は実行済みです。
+- 結果には実行した行を一覧表示します。コードが何も返さず、何もログに出さない場合、読み取りの値もそこに表示します。それ以外では、値を `return` してください。
 - 成功した行は、読み取りを除き、実行順に [`test_lines`](#test_lines) の下書きへ追加します。
 - `expect(value)` は、コードが持つ値を確認します。`toBe`、`toEqual`、`toContain`、`toMatch`、`toHaveLength`、比較のマッチャー、`.not` を使えます。
 - 各行の待機時間は、自身の `timeout` オプションを含め、最大 `timeout` です。設定の [`actionTimeout`](/reference/config#actiontimeout) と [`assertionTimeout`](/reference/config#assertiontimeout) がより短ければ、そちらを適用します。この上限は `app.open`、`app.restart`、`app.clearState` にも適用するため、初回読み込みやデバイス上でのアプリの再起動が遅い場合は増やしてください。
-- `setTimeout` は 1 回の呼び出しにつき最大 10 秒待機します。
-- 読み取りとマッチャーには、シークレットの値の代わりに `<secret:name>` が見えるため、コードがシークレットの値を持つことはありません。
+- `setTimeout` は 1 回の呼び出しにつき最大 10 秒待機します。`clearTimeout` で取り消せます。
+- `timeout` は、照合中の正規表現を止めません。長い行に対する `/^(\w+\s?)*$/` のようにバックトラックする正規表現は、終わるまでサーバーをブロックします。
+- 読み取り、マッチャー、エンジンのフィクスチャが返す値には、設定済みのシークレットの値の代わりに `<secret:name>` が見えます。
 - シークレットの `fill` は、実際の入力先で `type_secret` と同じ確認を行います。設定済みのシークレットであること、フィールドが有効かつ編集可能であること、パスワードならパスワードフィールドであることが必要です。
 
 コードは、Node のグローバル、モジュール、ファイル、ネットワークのないサンドボックスで実行します。アプリに届くのはテスト行を通じてだけで、サーバーは各行を実行する前に次の文法で構文解析します。
@@ -242,12 +246,12 @@ Test lines: 2.
 | 引数 | 文字列、数値、真偽値、`null`、正規表現、配列、オブジェクト、ロケーター、`credentials.user(name).username` |
 | シークレット | `fill` の値としてのみ、`credentials.user(name).password` または `secrets.get(name)` |
 
-対象外は、エンジンが提供する組み込みフィクスチャ（`browser`、`device`）、`page`、`expect(screen)`、`toHaveScreenshot`、`app.screenshot`、`screen.debug`、`screen.pause`、`all`、`setInputFiles` です。
+対象外は、`page`、`expect(screen)`、`toHaveScreenshot`、`app.screenshot`、`screen.debug`、`screen.pause`、`all`、`setInputFiles` です。
 
 | 上限 | 値 |
 | --- | --- |
 | アプリでの待機を除く、コード自体の実行時間 | 5 秒 |
-| 呼び出し全体 | 5 分 |
+| 呼び出し全体（最後の観察の前まで） | 5 分 |
 | メモリ | 64 MB |
 | 行と `setTimeout` の呼び出し | 1000 |
 | 戻り値 | 1 MB |

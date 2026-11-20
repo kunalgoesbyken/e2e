@@ -103,7 +103,7 @@ return { upper: texts.map((text) => text.toUpperCase()), caught };`,
     const handle = await run("return [JSON.stringify(secrets.get('apiKey')), typeof credentials.user('admin').password];");
     expect(handle.value).toEqual(['{"__src":"secrets.get(\'apiKey\')"}', 'object']);
     const callback = await run("await screen.getByRole('row').filter(() => true).count();");
-    expect(callback.error?.message).toBe('Error: a function is not an argument a test line takes');
+    expect(callback.error).toEqual({ code: 'INVALID_ARGUMENT', message: 'INVALID_ARGUMENT: a function is not an argument a test line takes' });
     expect(callback.lines).toEqual([]);
   });
 
@@ -210,6 +210,81 @@ return [title, width, String(browser.keyboard), typeof device];`,
       { base: { handle: 3 }, path: ['click'], args: [{ t: 'object', v: [['force', { t: 'value', v: true }]] }], source: "browser.locator('.row').first().click({ force: true })" },
       { base: { root: 'browser' }, path: ['viewport', 'width'], source: 'browser.viewport.width' },
     ]);
+  });
+
+  it('stops the lines sent behind one that fails without being awaited, and fails the call', async () => {
+    const ran = await run("screen.getByText('Missing').tap();\nscreen.getByText('Next').tap();", (source) =>
+      source.includes('Missing') ? { ok: false, code: 'LOCATOR_NOT_FOUND', message: 'no nodes' } : { ok: true, value: null },
+    );
+    expect(ran.lines).toEqual(["await screen.getByText('Missing').tap();"]);
+    expect(ran.error).toEqual({ code: 'LOCATOR_NOT_FOUND', message: 'LOCATOR_NOT_FOUND: no nodes' });
+
+    // A failure the code awaits and catches stops nothing after it.
+    const caught = await run("try { await screen.getByText('Missing').tap(); } catch {}\nawait screen.getByText('Next').tap(); return 'on';", (source) =>
+      source.includes('Missing') ? { ok: false, code: 'LOCATOR_NOT_FOUND', message: 'no nodes' } : { ok: true, value: null },
+    );
+    expect(caught.lines).toHaveLength(2);
+    expect(caught.value).toBe('on');
+    expect(caught.error).toBeUndefined();
+  });
+
+  it('compares values as the test API does', async () => {
+    const passed = await run(`expect({ a: 1, b: [2, { c: 3 }] }).toEqual({ b: [2, { c: 3 }], a: 1 });
+expect({ a: 1, b: undefined }).toEqual({ a: 1 });
+expect(/a/g).not.toEqual(/b/g);
+expect(/a/i).toEqual(/a/i);
+expect([{ id: 1 }, { id: 2 }]).toContain({ id: 2 });
+expect([1, 2]).not.toContain(3);
+const pattern = /b/g;
+expect('abc').toMatch(pattern);
+expect('abc').toMatch(pattern);`);
+    expect(passed.error).toBeUndefined();
+    for (const [code, message] of [
+      ["expect({ a: 1 }).toEqual({ a: 2 });", 'ASSERTION_FAILED: expected {"a":1} to equal {"a":2}'],
+      ["expect(/a/).toEqual(/b/);", 'ASSERTION_FAILED: expected /a/ to equal /b/'],
+      ["expect(5).toContain(5);", 'ASSERTION_FAILED: toContain requires a string or an array, got 5'],
+      ["expect(5).toMatch(/5/);", 'ASSERTION_FAILED: toMatch requires a string, got 5'],
+    ] as const) {
+      expect((await run(code)).error, code).toEqual({ code: 'ASSERTION_FAILED', message });
+    }
+    expect((await run('expect(new Set([1])).toEqual(new Set([1]));')).error?.code).toBe('INVALID_ARGUMENT');
+  });
+
+  it('refuses an argument a line cannot take with INVALID_ARGUMENT, which the code can catch', async () => {
+    const ran = await run("try { await screen.getByText('Row').filter(() => true).tap(); } catch (error) { return { code: error.code, message: error.message }; }");
+    expect(ran.value).toEqual({ code: 'INVALID_ARGUMENT', message: 'INVALID_ARGUMENT: a function is not an argument a test line takes' });
+    expect(ran.lines).toEqual([]);
+  });
+
+  it('fails the call when a timer callback throws, and runs no callback of a cleared timer', async () => {
+    const thrown = await run("setTimeout(() => { expect(1).toBe(2); }, 10); await new Promise((resolve) => setTimeout(resolve, 50)); return 'after';");
+    expect(thrown.error).toEqual({ code: 'ASSERTION_FAILED', message: 'ASSERTION_FAILED: expected 1 to be 2' });
+    const late = await run("setTimeout(() => { throw new Error('late'); }, 30); return 'early';");
+    expect(late.error?.message).toBe('Error: late');
+    const cleared = await run("let fired = false; const id = setTimeout(() => { fired = true; }, 20); clearTimeout(id); await new Promise((resolve) => setTimeout(resolve, 80)); return fired;");
+    expect(cleared.error).toBeUndefined();
+    expect(cleared.value).toBe(false);
+  });
+
+  it('runs no queued line once the whole call runs out of time, and waits for the one in the app', async () => {
+    const started: string[] = [];
+    let settled = 0;
+    const result = await runInSandbox({
+      code: "for (let i = 0; i < 4; i++) screen.getByText('row ' + i).tap();\nawait new Promise(() => {});",
+      line: async (source) => {
+        started.push(source);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        settled++;
+        return { ok: true, value: null };
+      },
+      signal: undefined,
+      timeoutMs: 150,
+    });
+    expect(result.error?.message).toBe('the code did not finish within 150 ms');
+    expect(started).toEqual(["await screen.getByText('row 0').tap();"]);
+    expect(settled).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(started).toHaveLength(1);
   });
 
   it('waits with setTimeout', async () => {
