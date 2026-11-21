@@ -55,8 +55,8 @@ export interface TransitionBudgets {
    * After a scroll or swipe, which can return while the content is still
    * moving. The least wait. The wait then goes on until the control stops
    * moving, two reads agreeing, at most 4 s after the gesture. A budget above
-   * 4 s ends the wait at that budget, and 0 is no wait at all. Default: the
-   * `default` budget.
+   * 4 s ends the wait at that budget. 0 sleeps for nothing, and the control is
+   * still read until it stops. Default: the `default` budget.
    */
   readonly gesture?: number | undefined;
   /** After the app launches, relaunches, or closes, or a link opens into it. Default: the `default` budget. */
@@ -146,8 +146,9 @@ export interface MobileOptions {
    * agree on where it and any control that looks like it sit, at most 4 s
    * after the gesture, or at the budget when that is larger, or sooner when
    * the action's own timeout cannot fit another read. A plain number sets the
-   * `gesture` budget too. A budget of 0 is no wait at all. After any other
-   * action the budget is the whole wait.
+   * `gesture` budget too. A budget of 0 sleeps for nothing, but a control that
+   * came with a gesture is still read until it stops moving. After any other
+   * action the budget is the whole wait, and 0 is no wait at all.
    */
   readonly transition?: number | TransitionBudgets | undefined;
   /**

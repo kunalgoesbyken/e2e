@@ -317,23 +317,23 @@ function lookalikes(entry: NodeBinding, index: readonly ProjectedNode[]): Projec
 }
 
 /**
- * Where a binding's control and its look-alikes sit in one capture; undefined
- * when one has no bounds, since nothing can be said to hold still then. The
+ * Where a binding's control and its look-alikes sit in one capture. A node
+ * with no bounds is left out, as nothing can be said to move it, so a capture
+ * of only such nodes is an empty sighting, which equals any other. The
  * look-alikes count so that a row of a repeated list, moved by exactly one row
  * between two reads, does not pass for one that stood still.
  */
-function sighting(entry: NodeBinding, index: readonly ProjectedNode[]): Sighting | undefined {
+function sighting(entry: NodeBinding, index: readonly ProjectedNode[]): Sighting {
   const rects: Rect[] = [];
   for (const candidate of lookalikes(entry, index)) {
-    if (candidate.node.rect === undefined) return undefined;
-    rects.push(candidate.node.rect);
+    if (candidate.node.rect !== undefined) rects.push(candidate.node.rect);
   }
   return rects.toSorted((a, b) => a.y - b.y || a.x - b.x);
 }
 
 /** Whether two sightings are one: as many nodes, each in the same place as its counterpart in position order. */
-function sameSighting(a: Sighting | undefined, b: Sighting | undefined): boolean {
-  return a !== undefined && b !== undefined && a.length === b.length && a.every((rect, position) => sameRect(rect, b[position]));
+function sameSighting(a: Sighting, b: Sighting): boolean {
+  return a.length === b.length && a.every((rect, position) => sameRect(rect, b[position]));
 }
 
 const MAX_LOCATED_REFS = 2048;
@@ -1459,7 +1459,8 @@ export class AgentDeviceSurface {
    * the wait is a sleep, and a read after it finds the control again. No read
    * can end that sleep early, since the tree cannot tell a control that is
    * still sliding in from one that landed, see DEFAULT_TRANSITION_MS. A budget
-   * of 0 is no wait at all, after a gesture too: no sleep and no read. With
+   * of 0 is no wait at all after any other action. After a gesture it sleeps
+   * for nothing and still reads until the control is seen at rest. With
    * `input`, the read that finds the control at rest also passes the checks
    * `relocated` makes for an input, so a fill or clear needs no read of its own
    * after it. `holdMs` is how long the action then holds, a long press, which
@@ -1469,7 +1470,7 @@ export class AgentDeviceSurface {
     const since = Date.now() - this.lastActionAt;
     const kind = this.lastActionKind;
     const floor = this.transitionWaits[kind];
-    const until = kind === 'gesture' && floor > 0 ? Math.max(floor, GESTURE_REST_CAP_MS) : floor;
+    const until = kind === 'gesture' ? Math.max(floor, GESTURE_REST_CAP_MS) : floor;
     if (since >= until) return false;
     const before = this.screenBeforeAction;
     if (before !== undefined && before.keyboardVisible === entry.keyboardVisible && this.samePlace(entry, before.index) !== undefined) return false;
@@ -1526,10 +1527,10 @@ export class AgentDeviceSurface {
    * After a newer read only the control's own place is left of it, which a read
    * with a look-alike never matches.
    */
-  private sightingAt(entry: NodeBinding): Sighting | undefined {
+  private sightingAt(entry: NodeBinding): Sighting {
     const latest = this.latestScreen;
     if (latest?.index.some((node) => node.id === entry.id) === true) return sighting(entry, latest.index);
-    return entry.node.rect === undefined ? undefined : [entry.node.rect];
+    return entry.node.rect === undefined ? [] : [entry.node.rect];
   }
 
   /** Refreshes a control after a transition wait. That is the control as the wait read it at rest, else found again after a sleep, else the binding itself when no wait was needed. */

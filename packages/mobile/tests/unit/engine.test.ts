@@ -3975,15 +3975,35 @@ describe('deterministic actions', () => {
     it.each([
       ['a gesture budget of 0', { transition: { gesture: 0 } }],
       ['a transition of 0', { transition: 0 }],
-    ] as const)('goes ahead at once with %s, with no sleep and no read for rest', async (_what, options) => {
+    ] as const)('sleeps nothing with %s and still reads until the control is seen at rest', async (_what, options) => {
       const h = harness(options);
       const t0 = await scrolled(h);
       const { times } = scrollScreen(h, byRead([[450], [480], [480]]));
       await tapOnScreen(h);
-      // Only the read the tap resolved on.
-      expect(times).toHaveLength(1);
-      expect(Date.now()).toBe(t0);
-      expect(h.fake.lastArgs('interactions.press')).toEqual({ ref: '@e11~s1' });
+      // The entry's read, one that saw it move, and one that agreed with it. The first read here is the entry's own, so no read waited for a sleep.
+      expect(times).toHaveLength(3);
+      expect(times[0]! - t0).toBe(0);
+      expect(times[2]! - times[1]!).toBeLessThanOrEqual(100);
+      expect(h.fake.lastArgs('interactions.press')).toEqual({ ref: '@e11~s3' });
+    });
+
+    it('does not let a look-alike with no bounds keep the control from being seen at rest', async () => {
+      const h = harness({ transition: { gesture: 500 } });
+      const t0 = await scrolled(h);
+      const { times } = scrollScreen(h, byRead([[500]]), { label: 'Add' });
+      const withBoundless = (generation: number) => {
+        const base = screenOf([500], generation, 'Add');
+        const extra: RawNode = { ref: '@e30', index: 30, parentIndex: 0, depth: 1, type: 'button', label: 'Add' };
+        return { ...base, nodes: [...base.nodes, extra] };
+      };
+      h.fake.respond('capture.snapshot', async () => {
+        times.push(Date.now());
+        return withBoundless(times.length);
+      });
+      await tapOnScreen(h, test(), 'Add');
+      // Two reads that agree: the entry's own and the one after the least wait, not a run to the 4 s cap.
+      expect(times.map((at) => at - t0)).toEqual([0, 500]);
+      expect(Date.now() - t0).toBe(500);
     });
 
     it('still looks for rest when the least wait is a single millisecond', async () => {

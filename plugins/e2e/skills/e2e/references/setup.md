@@ -422,7 +422,9 @@ export default {
   The control is then read until it stops moving, which is two reads that
   agree, at most 4 s after the gesture, or at the budget when that is larger,
   or sooner when the action's own timeout cannot fit another read. A plain
-  number sets it too, and 0 is no wait at all. Opening or closing the keyboard
+  number sets it too. A budget of 0 sleeps for nothing: it is no wait at all
+  after any other action, and after a gesture the control is still read until
+  it stops moving. Opening or closing the keyboard
   also uses the remaining budget. Screen swipes in tests wait out the remaining
   budget before scrolling. Agent actions settle `settle` ms (default 150) before
   the next observation, `settle: false` skips it.
